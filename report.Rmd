@@ -1,0 +1,114 @@
+---
+title: "Project Report"
+author: "Ian Castillo Rosales"
+date: "January 25, 2015"
+output: html_document
+---
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+**In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.**
+
+## Data
+
+Participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: **exactly according to the specification (Class A)**, throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+The training data for this project are available here: 
+
+      https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+      https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+## Getting and Cleaning Data
+First we set the libraries for the analysis
+```{r, echo=FALSE, results='hide'}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(randomForest)
+```
+
+Download the data and specify the NA values for the data set.
+```{r}
+url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url, destfile = "train.csv", method = "curl")
+train <- read.csv("train.csv", na.strings=c("NA","#DIV/0!",""))
+```
+
+### Trasformation in the data
+I looked the data set and inmediately could disscard some variables, like time variables and variables related with user names and index, usefuless to the model.
+```{r}
+train <- train[, -c(1, 2, grep("time", names(train)))]
+```
+
+Then, I asked: How many predictores have all their values equal to NA? and how many predictores have many values equal to NA? I discarded this variables because aren't not relevant for the prediction model and maybe can cause more bias for the result.
+```{r}
+sum(colSums(is.na(train)) == nrow(train))
+train <- train[, colSums(is.na(train)) < 19000]
+```
+
+Later, I applied a near zero variance analysis to discard variables that no aport any information
+```{r, cache=TRUE}
+nearZeroVar(train, saveMetrics = T)
+```
+All variables in the nzv are FALSE, we can keep with all of them.
+
+## Prediction Model
+I used a random forest for this classification problem. Below I describe the reasons for that:
+
+- Random forests are particularly well suited to handle a large number of inputs, especially when the interactions between variables are unknown.
+- A random forest has a built in cross-validation component that gives an unbiased estimate of the forest's out-of-sample (OOB) error rate.
+- A random forest can be used to estimate variable importance. This is especially helpful if the goal is to trim down the inputs into a more parsimonious set.
+
+I split the training set into two new sets, a train fo the train set, and a test set of the training set, this to spend less time in the modeling process and have more accuracy in the final test model.
+
+```{r}
+set.seed(1111)
+indexTrain <- createDataPartition(train$classe, p = 0.60, list = F)
+trTrain <- train[indexTrain, ]
+teTrain <- train[-indexTrain, ]
+```
+
+I decided to try classification trees “out of the box” and then introduce preprocessing and cross validation. I only attempt random forests with cross validation. For the first model I decided use a random forest witout cross validation
+```{r}
+rfModel <- randomForest(classe ~ ., data = trTrain)
+rfPred <- predict(rfModel, newdata = teTrain)
+confusionMatrix(rfPred, teTrain$classe)
+```
+
+The next model us a cross validation with the K-fold method, $K = 10$
+```{r, cache=TRUE}
+train_control <- trainControl(method="cv", number=10)
+rfModel2 <- randomForest(classe ~ ., trControl = train_control, data = trTrain)
+rfPred2 <- predict(rfModel2, newdata = teTrain)
+confusionMatrix(rfPred2, teTrain$classe)
+```
+
+## Test the model fit with the final test data
+
+Download the test data and load into R
+```{r}
+url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url, destfile = "test.csv", method = "curl")
+test <- read.csv("test.csv", na.strings=c("NA","#DIV/0!",""))
+test <- test[colnames(train[, -55])]
+levels(test$new_window) <- c("no", "yes")
+```
+
+Predict the values into the model...
+```{r, cache=TRUE}
+predictions <- predict(rfModel2, newdata = test)
+predictions
+```
+
+# Out of Sample Error
+*The out of sample error is the “error rate you get on new data set.”* In this case. 
+according to Professor Leek's Week 1 “In and out of sample errors”, the out of sample error is the “error rate you get on new data set.” In my case, it's the error rate after running the predict() function on the 4 testing sets:
+
+Random Forest (preprocessing and cross validation) Testing Set 1: 1 - .995 = 0.005
